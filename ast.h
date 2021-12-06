@@ -45,6 +45,7 @@ public:
     REF,
     BINARY,
     CALL,
+    INT,
   };
 
 public:
@@ -73,6 +74,24 @@ public:
 private:
   /// Name of the identifier.
   std::string name_;
+};
+
+/**
+ * Expression referring to a named value.
+ */
+class IntExpr : public Expr {
+public:
+  IntExpr(const uint64_t number)
+    : Expr(Kind::INT)
+    , name_(number)
+  {
+  }
+
+  uint64_t GetNumber() const { return name_; }
+
+private:
+  /// Name of the number.
+  uint64_t name_;
 };
 
 /**

@@ -1,0 +1,281 @@
+diff --git a/ast.h b/ast.h
+index 939b3d2..8869394 100644
+--- a/ast.h
++++ b/ast.h
+@@ -45,6 +45,7 @@ public:
+     REF,
+     BINARY,
+     CALL,
++    INT,
+   };
+ 
+ public:
+@@ -75,6 +76,24 @@ private:
+   std::string name_;
+ };
+ 
++/**
++ * Expression referring to a named value.
++ */
++class IntExpr : public Expr {
++public:
++  IntExpr(const uint64_t number)
++    : Expr(Kind::INT)
++    , name_(number)
++  {
++  }
++
++  uint64_t GetNumber() const { return name_; }
++
++private:
++  /// Name of the number.
++  uint64_t name_;
++};
++
+ /**
+  * Binary expression.
+  */
+diff --git a/codegen.cpp b/codegen.cpp
+index 4ce40c6..18fa4be 100644
+--- a/codegen.cpp
++++ b/codegen.cpp
+@@ -177,6 +177,9 @@ void Codegen::LowerExpr(const Scope &scope, const Expr &expr)
+     case Expr::Kind::CALL: {
+       return LowerCallExpr(scope, static_cast<const CallExpr &>(expr));
+     }
++    case Expr::Kind::INT: {
++      return LowerIntExpr(scope, static_cast<const IntExpr &>(expr));
++    }
+   }
+ }
+ 
+@@ -212,6 +215,12 @@ void Codegen::LowerBinaryExpr(const Scope &scope, const BinaryExpr &binary)
+   }
+ }
+ 
++// -----------------------------------------------------------------------------
++void Codegen::LowerIntExpr(const Scope &scope, const IntExpr &value)
++{
++	EmitPushInt (value.GetNumber());
++}
++
+ // -----------------------------------------------------------------------------
+ void Codegen::LowerCallExpr(const Scope &scope, const CallExpr &call)
+ {
+@@ -314,6 +323,16 @@ void Codegen::EmitPushProto(RuntimeFn fn)
+   Emit<RuntimeFn>(fn);
+ }
+ 
++// -----------------------------------------------------------------------------
++
++void Codegen::EmitPushInt(uint64_t index)
++{
++  depth_ += 1;
++  Emit<Opcode>(Opcode::PUSH_INT);
++  Emit<int64_t>(index);
++}
++
++
+ // -----------------------------------------------------------------------------
+ void Codegen::EmitPeek(uint32_t index)
+ {
+diff --git a/codegen.h b/codegen.h
+index 1a1aa36..dcd22b6 100644
+--- a/codegen.h
++++ b/codegen.h
+@@ -125,6 +125,8 @@ private:
+   void LowerRefExpr(const Scope &scope, const RefExpr &expr);
+   /// Lowers a binary expression.
+   void LowerBinaryExpr(const Scope &scope, const BinaryExpr &expr);
++  /// Lowers an int expression.
++  void LowerIntExpr(const Scope &scope, const IntExpr &expr);
+   /// Lowers a call expression.
+   void LowerCallExpr(const Scope &scope, const CallExpr &expr);
+ 
+@@ -146,6 +148,8 @@ private:
+   /// Push the nth value from the stack to the top.
+   void EmitPeek(uint32_t index);
+   /// Emit a return instruction.
++  void EmitPushInt(uint64_t index);
++  /// Emit a return instruction.
+   void EmitReturn();
+   /// Emit an add opcode.
+   void EmitAdd();
+diff --git a/interp.cpp b/interp.cpp
+index d815224..cedc333 100644
+--- a/interp.cpp
++++ b/interp.cpp
+@@ -21,6 +21,11 @@ void Interp::Run()
+         Push(prog_.Read<RuntimeFn>(pc_));
+         continue;
+       }
++      case Opcode::PUSH_INT: {
++        auto value = prog_.Read<int64_t>(pc_);
++        Push(value);
++        continue;
++      }
+       case Opcode::PEEK: {
+         auto idx = prog_.Read<unsigned>(pc_);
+         Push(*(stack_.rbegin() + idx));
+@@ -51,6 +56,8 @@ void Interp::Run()
+       case Opcode::ADD: {
+         auto rhs = PopInt();
+         auto lhs = PopInt();
++        //if ((lhs + rhs) >= (2^63))
++			//Error("the number does not fit into signed int type");
+         Push(lhs + rhs);
+         continue;
+       }
+diff --git a/lexer.cpp b/lexer.cpp
+index 5a03b75..f8dd524 100644
+--- a/lexer.cpp
++++ b/lexer.cpp
+@@ -17,6 +17,10 @@ Token::Token(const Token &that)
+       value_.StringValue = new std::string(*that.value_.StringValue);
+       break;
+     }
++    case Kind::INT: {
++      value_.IntValue = that.value_.IntValue;
++      break;
++    }
+     default: {
+       break;
+     }
+@@ -32,6 +36,7 @@ Token &Token::operator=(const Token &that)
+       delete value_.StringValue;
+       break;
+     }
++    case Kind::INT:
+     default: {
+       break;
+     }
+@@ -44,6 +49,10 @@ Token &Token::operator=(const Token &that)
+       value_.StringValue = new std::string(*that.value_.StringValue);
+       break;
+     }
++    case Kind::INT: {
++      value_.IntValue = that.value_.IntValue;
++      break;
++    }
+     default: {
+       break;
+     }
+@@ -60,6 +69,7 @@ Token::~Token()
+       delete value_.StringValue;
+       break;
+     }
++    case Kind::INT:
+     default: {
+       break;
+     }
+@@ -82,6 +92,14 @@ Token Token::String(const Location &l, const std::string &str)
+   return tk;
+ }
+ 
++// -----------------------------------------------------------------------------
++Token Token::Int(const Location &l, std::uint64_t i)
++{
++  Token tk(l, Kind::INT);
++  tk.value_.IntValue = i;
++  return tk;
++}
++
+ // -----------------------------------------------------------------------------
+ void Token::Print(std::ostream &os) const
+ {
+@@ -165,6 +183,19 @@ static bool IsIdentLetter(char chr)
+ }
+ 
+ // -----------------------------------------------------------------------------
++
++int StrToInt (const char *s){
++	int x=0;
++	while ( *s != 0 ) {
++		x = x * 10;
++		x = *s - '0';
++		s++;
++	}
++	return x;
++}
++
++// -----------------------------------------------------------------------------
++
+ const Token &Lexer::Next()
+ {
+   // Skip all whitespace until a valid token.
+@@ -208,6 +239,19 @@ const Token &Lexer::Next()
+         if (word == "while") return tk_ = Token::While(loc);
+         return tk_ = Token::Ident(loc, word);
+       }
++      if ( isdigit(chr_) ){
++      	uint64_t x=0;
++		while ( isdigit(chr_) ) {
++			x = x * 10;
++			x = x + chr_ - '0';
++			NextChar();
++		}
++		//vezi daca depaseste signed int
++		//if (x >= (2^63))
++			//Error("the number does not fit into signed int type");
++		//else
++      		return tk_ = Token::Int(loc, x);
++      }
+       Error("unknown character '" + std::string(1, chr_) + "'");
+     }
+   }
+diff --git a/lexer.h b/lexer.h
+index 6b09b0c..4cb90bb 100644
+--- a/lexer.h
++++ b/lexer.h
+@@ -79,6 +79,13 @@ public:
+     assert(Is(Kind::IDENT) && "not an identifier");
+     return *value_.StringValue;
+   }
++  
++  /// Return the int value.
++  uint64_t GetNumber() const
++  {
++    assert(Is(Kind::INT) && "not an identifier");
++    return value_.IntValue;
++  }
+ 
+   /// Return the string value.
+   std::string_view GetString() const
+@@ -106,6 +113,7 @@ public:
+   static Token While(const Location &l) { return Token(l, Kind::WHILE); }
+   static Token Ident(const Location &l, const std::string &str);
+   static Token String(const Location &l, const std::string &str);
++  static Token Int(const Location &l, std::uint64_t i);
+ 
+   /// Print the token to a stream.
+   void Print(std::ostream &os) const;
+diff --git a/parser.cpp b/parser.cpp
+index f4f42b6..45fcd41 100644
+--- a/parser.cpp
++++ b/parser.cpp
+@@ -144,6 +144,13 @@ std::shared_ptr<Expr> Parser::ParseTermExpr()
+           std::make_shared<RefExpr>(ident)
+       );
+     }
++    case Token::Kind::INT: {
++      uint64_t number(tk.GetNumber());
++      lexer_.Next();
++      return std::static_pointer_cast<Expr>(
++          std::make_shared<IntExpr>(number)
++      );
++    }
+     default: {
+       std::ostringstream os;
+       os << "unexpected " << tk << ", expecting term";
+diff --git a/program.h b/program.h
+index 9b6b62d..25c7d1d 100644
+--- a/program.h
++++ b/program.h
+@@ -15,6 +15,7 @@
+ enum class Opcode : uint8_t {
+   PUSH_FUNC,
+   PUSH_PROTO,
++  PUSH_INT,
+ 
+   PEEK,
+   POP,

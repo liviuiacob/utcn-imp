@@ -17,6 +17,10 @@ Token::Token(const Token &that)
       value_.StringValue = new std::string(*that.value_.StringValue);
       break;
     }
+    case Kind::INT: {
+      value_.IntValue = that.value_.IntValue;
+      break;
+    }
     default: {
       break;
     }
@@ -32,6 +36,7 @@ Token &Token::operator=(const Token &that)
       delete value_.StringValue;
       break;
     }
+    case Kind::INT:
     default: {
       break;
     }
@@ -42,6 +47,10 @@ Token &Token::operator=(const Token &that)
     case Kind::STRING:
     case Kind::IDENT: {
       value_.StringValue = new std::string(*that.value_.StringValue);
+      break;
+    }
+    case Kind::INT: {
+      value_.IntValue = that.value_.IntValue;
       break;
     }
     default: {
@@ -60,6 +69,7 @@ Token::~Token()
       delete value_.StringValue;
       break;
     }
+    case Kind::INT:
     default: {
       break;
     }
@@ -79,6 +89,14 @@ Token Token::String(const Location &l, const std::string &str)
 {
   Token tk(l, Kind::STRING);
   tk.value_.StringValue = new std::string(str);
+  return tk;
+}
+
+// -----------------------------------------------------------------------------
+Token Token::Int(const Location &l, std::uint64_t i)
+{
+  Token tk(l, Kind::INT);
+  tk.value_.IntValue = i;
   return tk;
 }
 
@@ -165,6 +183,19 @@ static bool IsIdentLetter(char chr)
 }
 
 // -----------------------------------------------------------------------------
+
+int StrToInt (const char *s){
+	int x=0;
+	while ( *s != 0 ) {
+		x = x * 10;
+		x = *s - '0';
+		s++;
+	}
+	return x;
+}
+
+// -----------------------------------------------------------------------------
+
 const Token &Lexer::Next()
 {
   // Skip all whitespace until a valid token.
@@ -207,6 +238,19 @@ const Token &Lexer::Next()
         if (word == "return") return tk_ = Token::Return(loc);
         if (word == "while") return tk_ = Token::While(loc);
         return tk_ = Token::Ident(loc, word);
+      }
+      if ( isdigit(chr_) ){
+      	uint64_t x=0;
+		while ( isdigit(chr_) ) {
+			x = x * 10;
+			x = x + chr_ - '0';
+			NextChar();
+		}
+		//vezi daca depaseste signed int
+		//if (x >= (2^63))
+			//Error("the number does not fit into signed int type");
+		//else
+      		return tk_ = Token::Int(loc, x);
       }
       Error("unknown character '" + std::string(1, chr_) + "'");
     }
